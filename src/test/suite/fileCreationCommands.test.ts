@@ -5,9 +5,103 @@
 
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { __test } from '../../commands/fileCreationCommands';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import sinon from 'sinon';
+import { __test, newBookmapCommand, newMapCommand, newTopicCommand } from '../../commands/fileCreationCommands';
+
+/**
+ * 一時ワークスペースを差し替えてクリーンな作業領域を確保する。
+ * @returns 一時ディレクトリのパスと復元用の関数
+ */
+function createTempWorkspaceFolder(): { tempDir: string; restore: () => void } {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ditacraft-file-'));
+    const newFolder: vscode.WorkspaceFolder = {
+        uri: vscode.Uri.file(tempDir),
+        name: path.basename(tempDir),
+        index: 0
+    };
+
+    const originalFolders = vscode.workspace.workspaceFolders;
+    let workspaceOverridden = false;
+
+    try {
+        Object.defineProperty(vscode.workspace, 'workspaceFolders', {
+            value: [newFolder],
+            configurable: true
+        });
+        workspaceOverridden = true;
+    } catch {
+        // プロパティ差し替えに失敗した場合は元のワークスペースを使用する
+    }
+
+    const restore = (): void => {
+        try {
+            if (workspaceOverridden) {
+                Object.defineProperty(vscode.workspace, 'workspaceFolders', {
+                    value: originalFolders,
+                    configurable: true
+                });
+            } else {
+                (vscode.workspace as any).workspaceFolders = originalFolders;
+            }
+        } catch {
+            // 復元に失敗してもクリーンアップは継続する
+        } finally {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    };
+
+    return { tempDir, restore };
+}
+
+type WindowStubKeys = 'showQuickPick' | 'showInputBox' | 'showInformationMessage' | 'showErrorMessage' | 'showTextDocument';
+type WorkspaceStubKeys = 'openTextDocument';
+
+/**
+ * VS Code ウィンドウ API をモックし、テスト後に元へ戻す。
+ * @param overrides 差し替えるメソッド群
+ * @returns 復元関数
+ */
+function stubWindow(overrides: Partial<Record<WindowStubKeys, (...args: unknown[]) => unknown>>): () => void {
+    const originals: Partial<Record<WindowStubKeys, unknown>> = {};
+    for (const key of Object.keys(overrides) as WindowStubKeys[]) {
+        originals[key] = (vscode.window as any)[key];
+        (vscode.window as any)[key] = overrides[key] as unknown;
+    }
+    return () => {
+        for (const key of Object.keys(overrides) as WindowStubKeys[]) {
+            (vscode.window as any)[key] = originals[key];
+        }
+    };
+}
+
+/**
+ * VS Code ワークスペース API をモックし、テスト後に元へ戻す。
+ * @param overrides 差し替えるメソッド群
+ * @returns 復元関数
+ */
+function stubWorkspace(overrides: Partial<Record<WorkspaceStubKeys, (...args: unknown[]) => unknown>>): () => void {
+    const originals: Partial<Record<WorkspaceStubKeys, unknown>> = {};
+    for (const key of Object.keys(overrides) as WorkspaceStubKeys[]) {
+        originals[key] = (vscode.workspace as any)[key];
+        (vscode.workspace as any)[key] = overrides[key] as unknown;
+    }
+    return () => {
+        for (const key of Object.keys(overrides) as WorkspaceStubKeys[]) {
+            (vscode.workspace as any)[key] = originals[key];
+        }
+    };
+}
+
+let sandbox: sinon.SinonSandbox;
 
 suite('File Creation Commands Test Suite', () => {
+
+    setup(() => {
+        sandbox = sinon.createSandbox();
+    });
 
     suiteSetup(async () => {
         // Get and activate extension
@@ -22,6 +116,7 @@ suite('File Creation Commands Test Suite', () => {
     });
 
     teardown(async () => {
+        sandbox.restore();
         // Close all editors after each test
         await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     });
@@ -52,138 +147,284 @@ suite('File Creation Commands Test Suite', () => {
         });
     });
 
-    suite('Command Accessibility', () => {
-        test('Commands should be accessible from command palette', async function() {
-            this.timeout(5000);
+    suite('Command Execution Flow', () => {
+        test('newTopicCommand は入力を受けてトピックファイルを生成する', async function() {
+            this.timeout(7000);
 
-            // Verify commands exist and are callable (even if cancelled by user)
-            const commands = await vscode.commands.getCommands(true);
+            const { tempDir, restore } = createTempWorkspaceFolder();
+            const targetFile = path.join(tempDir, 'my-topic.dita');
 
-            const expectedCommands = [
-                'ditacraft.newTopic',
-                'ditacraft.newMap',
-                'ditacraft.newBookmap'
-            ];
+            const restoreWindow = stubWindow({
+                showQuickPick: async () => ({ label: 'Topic', description: 'Generic DITA topic', value: 'topic' } as any),
+                showInputBox: async () => 'my-topic',
+                showInformationMessage: async () => undefined
+            });
 
-            for (const cmd of expectedCommands) {
-                assert.ok(
-                    commands.includes(cmd),
-                    `Command ${cmd} should be registered`
-                );
+            const openedPaths: string[] = [];
+            const restoreWorkspace = stubWorkspace({
+                openTextDocument: async (uri: unknown) => {
+                    const fsPath = typeof uri === 'string' ? uri : (uri as vscode.Uri).fsPath;
+                    openedPaths.push(fsPath);
+                    return { fileName: fsPath } as unknown as vscode.TextDocument;
+                }
+            });
+
+            const originalShowTextDocument = vscode.window.showTextDocument;
+            const shown: string[] = [];
+            (vscode.window as any).showTextDocument = async (doc: unknown) => {
+                shown.push((doc as any).fileName ?? '');
+                return {} as vscode.TextEditor;
+            };
+
+            try {
+                await newTopicCommand();
+                assert.ok(fs.existsSync(targetFile), 'トピックファイルが生成されること');
+                const content = fs.readFileSync(targetFile, 'utf8');
+                assert.ok(content.includes('<topic id="my-topic">'), '生成ファイルにIDが埋め込まれること');
+                assert.ok(openedPaths.includes(targetFile), '生成後にドキュメントを開くこと');
+                assert.ok(shown.includes(targetFile), 'エディタ表示を試みること');
+            } finally {
+                (vscode.window as any).showTextDocument = originalShowTextDocument;
+                restoreWorkspace();
+                restoreWindow();
+                restore();
             }
         });
-    });
 
-    suite('File Creation Command Behavior', () => {
-        // Note: These tests are limited because file creation commands
-        // require user interaction (showQuickPick, showInputBox)
-        // Full integration tests would need mocking
-
-        test('newTopic command should exist and be executable', async function() {
+        test('トピックタイプ選択をキャンセルした場合は作成しない', async function() {
             this.timeout(5000);
 
-            // The command should be executable (will prompt for input)
-            // We can't test the full flow without mocking user input
-            const commands = await vscode.commands.getCommands(true);
-            assert.ok(commands.includes('ditacraft.newTopic'));
+            const { tempDir, restore } = createTempWorkspaceFolder();
+            const targetFile = path.join(tempDir, 'cancel.dita');
+            let inputCalled = 0;
 
-            // Verify it's a function that can be called
-            // Note: This will open a quick pick, which we can't interact with in tests
-            // So we just verify the command exists
+            const restoreWindow = stubWindow({
+                showQuickPick: async () => undefined,
+                showInputBox: async () => {
+                    inputCalled += 1;
+                    return 'should-not-be-used';
+                }
+            });
+
+            try {
+                await newTopicCommand();
+                assert.strictEqual(inputCalled, 0, 'ファイル名入力は呼ばれないこと');
+                assert.ok(!fs.existsSync(targetFile), 'キャンセル時はファイルが作成されないこと');
+            } finally {
+                restoreWindow();
+                restore();
+            }
         });
 
-        test('newMap command should exist and be executable', async function() {
+        test('無効なファイル名はvalidateInputで弾かれ作成しない', async function() {
             this.timeout(5000);
 
-            const commands = await vscode.commands.getCommands(true);
-            assert.ok(commands.includes('ditacraft.newMap'));
+            const { tempDir, restore } = createTempWorkspaceFolder();
+            const targetFile = path.join(tempDir, 'bad name.dita');
+
+            sandbox.stub(vscode.window, 'showQuickPick').resolves({ label: 'Task', description: 'Step-by-step procedure', value: 'task' } as any);
+
+            const validateSpy = sandbox.spy(__test, 'validateFileName');
+
+            sandbox.stub(vscode.window, 'showInputBox').callsFake(async (options?: vscode.InputBoxOptions) => {
+                const validator = options?.validateInput;
+                const validationResult = validator ? validator('bad name') : null;
+                return validationResult ? undefined : 'bad name';
+            });
+
+            const infoStub = sandbox.stub(vscode.window, 'showInformationMessage');
+            const writeSpy = sandbox.spy(fs, 'writeFileSync');
+
+            try {
+                await newTopicCommand();
+                assert.ok(validateSpy.called, 'validateFileNameが呼ばれること');
+                assert.ok(writeSpy.notCalled, '無効入力ではファイルを書き込まないこと');
+                assert.ok(infoStub.notCalled, '成功メッセージを表示しないこと');
+                assert.ok(!fs.existsSync(targetFile), 'ファイルは作成されないこと');
+            } finally {
+                restore();
+            }
         });
 
-        test('newBookmap command should exist and be executable', async function() {
+        test('既存ファイルがある場合はエラー表示し上書きしない', async function() {
+            this.timeout(7000);
+
+            const { tempDir, restore } = createTempWorkspaceFolder();
+            const duplicateFile = path.join(tempDir, 'duplicate.dita');
+            fs.writeFileSync(duplicateFile, 'original', 'utf8');
+
+            const errors: string[] = [];
+            const restoreWindow = stubWindow({
+                showQuickPick: async () => ({ label: 'Topic', description: 'Generic DITA topic', value: 'topic' } as any),
+                showInputBox: async () => 'duplicate',
+                showErrorMessage: async (...args: unknown[]) => {
+                    const message = String(args[0]);
+                    errors.push(message);
+                    return undefined;
+                }
+            });
+
+            let openCalled = false;
+            const restoreWorkspace = stubWorkspace({
+                openTextDocument: async () => {
+                    openCalled = true;
+                    return {} as vscode.TextDocument;
+                }
+            });
+
+            try {
+                await newTopicCommand();
+                const contentAfter = fs.readFileSync(duplicateFile, 'utf8');
+                assert.strictEqual(contentAfter, 'original', '既存ファイルは上書きされないこと');
+                assert.ok(errors.some(m => m.includes('File already exists')), '既存ファイルの警告を出すこと');
+                assert.ok(!openCalled, '既存ファイルの場合はエディタを開かないこと');
+            } finally {
+                restoreWorkspace();
+                restoreWindow();
+                restore();
+            }
+        });
+
+        test('newMapCommand は不正入力を拒否する', async function() {
             this.timeout(5000);
 
-            const commands = await vscode.commands.getCommands(true);
-            assert.ok(commands.includes('ditacraft.newBookmap'));
-        });
-    });
+            const { tempDir, restore } = createTempWorkspaceFolder();
+            const targetFile = path.join(tempDir, 'bad name.ditamap');
 
-    suite('Command Menu Context', () => {
-        test('Commands should be available in command palette', async function() {
-            // Verify commands are discoverable
-            const commands = await vscode.commands.getCommands(false); // false = only contributed commands
+            const inputStub = sandbox.stub(vscode.window, 'showInputBox').callsFake(async (options?: vscode.InputBoxOptions) => {
+                const validator = options?.validateInput;
+                const validationResult = validator ? validator('bad name') : null;
+                return validationResult ? undefined : 'bad name';
+            });
 
-            // These commands should be in the non-internal list
-            assert.ok(
-                commands.includes('ditacraft.newTopic') ||
-                commands.some(c => c.includes('newTopic')),
-                'newTopic should be available'
-            );
-        });
-    });
+            const infoStub = sandbox.stub(vscode.window, 'showInformationMessage');
+            const writeSpy = sandbox.spy(fs, 'writeFileSync');
 
-    suite('File Name Validation Logic', () => {
-        // Test the validation logic used by file creation commands
-        // This tests the pattern used internally
-
-        const FILE_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
-
-        test('Should accept valid file names with letters', function() {
-            assert.ok(FILE_NAME_PATTERN.test('mytopic'));
-            assert.ok(FILE_NAME_PATTERN.test('MyTopic'));
-            assert.ok(FILE_NAME_PATTERN.test('TOPIC'));
+            try {
+                await newMapCommand();
+                assert.ok(inputStub.called, 'showInputBox が呼ばれること');
+                assert.ok(writeSpy.notCalled, 'バリデーションエラー時は書き込まないこと');
+                assert.ok(infoStub.notCalled, '成功メッセージを出さないこと');
+                assert.ok(!fs.existsSync(targetFile), '不正入力ではファイルが作成されないこと');
+            } finally {
+                restore();
+            }
         });
 
-        test('Should accept valid file names with numbers', function() {
-            assert.ok(FILE_NAME_PATTERN.test('topic1'));
-            assert.ok(FILE_NAME_PATTERN.test('123topic'));
-            assert.ok(FILE_NAME_PATTERN.test('topic123'));
+        test('newBookmapCommand はタイトル入力キャンセル時に中断する', async function() {
+            this.timeout(5000);
+
+            const { tempDir, restore } = createTempWorkspaceFolder();
+            const targetFile = path.join(tempDir, 'book-file.bookmap');
+
+            sandbox.stub(vscode.window, 'showInputBox').onFirstCall().resolves(undefined);
+
+            await newBookmapCommand();
+
+            assert.ok(!fs.existsSync(targetFile), 'キャンセル時はファイルを作らないこと');
+
+            restore();
         });
 
-        test('Should accept valid file names with hyphens', function() {
-            assert.ok(FILE_NAME_PATTERN.test('my-topic'));
-            assert.ok(FILE_NAME_PATTERN.test('my-long-topic-name'));
-        });
+        test('ファイル書き込み失敗はエラーとして伝搬する', async function() {
+            this.timeout(5000);
 
-        test('Should accept valid file names with underscores', function() {
-            assert.ok(FILE_NAME_PATTERN.test('my_topic'));
-            assert.ok(FILE_NAME_PATTERN.test('my_long_topic_name'));
-        });
+            const { restore } = createTempWorkspaceFolder();
 
-        test('Should accept mixed valid characters', function() {
-            assert.ok(FILE_NAME_PATTERN.test('my-topic_01'));
-            assert.ok(FILE_NAME_PATTERN.test('Topic-Name_v2'));
-        });
+            sandbox.stub(vscode.window, 'showQuickPick').resolves({ label: 'Topic', description: 'Generic DITA topic', value: 'topic' } as any);
+            sandbox.stub(vscode.window, 'showInputBox').resolves('io-error-topic');
+            const errorMessageStub = sandbox.stub(vscode.window, 'showErrorMessage');
 
-        test('Should reject file names with spaces', function() {
-            assert.ok(!FILE_NAME_PATTERN.test('my topic'));
-            assert.ok(!FILE_NAME_PATTERN.test('my topic name'));
-        });
+            const writeStub = sandbox.stub(fs, 'writeFileSync').throws(new Error('disk full'));
 
-        test('Should reject file names with special characters', function() {
-            assert.ok(!FILE_NAME_PATTERN.test('my.topic'));
-            assert.ok(!FILE_NAME_PATTERN.test('my@topic'));
-            assert.ok(!FILE_NAME_PATTERN.test('my#topic'));
-            assert.ok(!FILE_NAME_PATTERN.test('my$topic'));
-            assert.ok(!FILE_NAME_PATTERN.test('my%topic'));
-        });
-
-        test('Should reject empty file names', function() {
-            assert.ok(!FILE_NAME_PATTERN.test(''));
-        });
-    });
-
-    suite('Topic Type Templates', () => {
-        // Verify the topic types that should be available
-
-        const expectedTopicTypes = ['topic', 'concept', 'task', 'reference'];
-
-        test('Should support standard DITA topic types', function() {
-            // These are the types shown in the quick pick
-            for (const type of expectedTopicTypes) {
+            try {
+                await newTopicCommand();
+                assert.ok(writeStub.called, '書き込みを試みること');
+                assert.ok(errorMessageStub.called, 'エラーをユーザーへ表示すること');
                 assert.ok(
-                    typeof type === 'string' && type.length > 0,
-                    `Topic type ${type} should be valid`
+                    errorMessageStub.args.some((args: unknown[]) => typeof args[0] === 'string' && (args[0] as string).includes('Failed to create topic')),
+                    'エラーメッセージにコマンド名が含まれること'
                 );
+            } finally {
+                restore();
+            }
+        });
+
+        test('newMapCommand は .ditamap ファイルを生成する', async function() {
+            this.timeout(7000);
+
+            const { tempDir, restore } = createTempWorkspaceFolder();
+            const targetFile = path.join(tempDir, 'my-map.ditamap');
+
+            const restoreWindow = stubWindow({
+                showInputBox: async () => 'my-map',
+                showInformationMessage: async () => undefined
+            });
+
+            const restoreWorkspace = stubWorkspace({
+                openTextDocument: async (uri: unknown) => {
+                    const fsPath = typeof uri === 'string' ? uri : (uri as vscode.Uri).fsPath;
+                    return { fileName: fsPath } as unknown as vscode.TextDocument;
+                }
+            });
+
+            const originalShowTextDocument = vscode.window.showTextDocument;
+            (vscode.window as any).showTextDocument = async () => {
+                return {} as vscode.TextEditor;
+            };
+
+            try {
+                await newMapCommand();
+                assert.ok(fs.existsSync(targetFile), '.ditamap ファイルが生成されること');
+                const content = fs.readFileSync(targetFile, 'utf8');
+                assert.ok(content.includes('<map id="my-map">'), 'マップIDが反映されること');
+                assert.ok(content.includes('<topicref href="topic1.dita">'), 'テンプレートの内容が含まれること');
+            } finally {
+                (vscode.window as any).showTextDocument = originalShowTextDocument;
+                restoreWorkspace();
+                restoreWindow();
+                restore();
+            }
+        });
+
+        test('newBookmapCommand はタイトルを反映した .bookmap を生成する', async function() {
+            this.timeout(7000);
+
+            const { tempDir, restore } = createTempWorkspaceFolder();
+            const targetFile = path.join(tempDir, 'book-file.bookmap');
+
+            let inputCall = 0;
+            const restoreWindow = stubWindow({
+                showInputBox: async () => {
+                    inputCall += 1;
+                    return inputCall === 1 ? 'My Book Title' : 'book-file';
+                },
+                showInformationMessage: async () => undefined
+            });
+
+            const restoreWorkspace = stubWorkspace({
+                openTextDocument: async (uri: unknown) => {
+                    const fsPath = typeof uri === 'string' ? uri : (uri as vscode.Uri).fsPath;
+                    return { fileName: fsPath } as unknown as vscode.TextDocument;
+                }
+            });
+
+            const originalShowTextDocument = vscode.window.showTextDocument;
+            (vscode.window as any).showTextDocument = async () => {
+                return {} as vscode.TextEditor;
+            };
+
+            try {
+                await newBookmapCommand();
+                assert.ok(fs.existsSync(targetFile), '.bookmap ファイルが生成されること');
+                const content = fs.readFileSync(targetFile, 'utf8');
+                assert.ok(content.includes('<mainbooktitle>My Book Title</mainbooktitle>'), '入力したタイトルを使用すること');
+                assert.ok(content.includes('id="book-file"'), '入力したIDを使用すること');
+            } finally {
+                (vscode.window as any).showTextDocument = originalShowTextDocument;
+                restoreWorkspace();
+                restoreWindow();
+                restore();
             }
         });
     });
@@ -343,9 +584,14 @@ suite('File Creation Commands Test Suite', () => {
         });
 
         test('Should include current date in created element', function() {
+            const clock = sandbox.useFakeTimers(new Date('2024-04-05T12:34:56Z'));
             const content = __test.generateBookmapContent('Test', 'test');
-            const today = new Date().toISOString().split('T')[0];
-            assert.ok(content.includes(`date="${today}"`));
+            const match = content.match(/<created date="([0-9]{4}-[0-9]{2}-[0-9]{2})"\/>/);
+            clock.restore();
+
+            assert.ok(match, 'created 要素が存在すること');
+            const isoDate = match ? match[1] : '';
+            assert.strictEqual(isoDate, '2024-04-05', '日付が固定値で生成されること');
         });
     });
 });

@@ -5,10 +5,17 @@
 
 import * as assert from 'assert';
 import * as vscode from 'vscode';
+import sinon from 'sinon';
 import { DitaOtWrapper } from '../../utils/ditaOtWrapper';
 import { configureDitaOTCommand } from '../../commands/configureCommand';
 
+let sandbox: sinon.SinonSandbox;
+
 suite('Configure Command Test Suite', () => {
+
+    setup(() => {
+        sandbox = sinon.createSandbox();
+    });
 
     suiteSetup(async () => {
         // Get and activate extension
@@ -23,6 +30,7 @@ suite('Configure Command Test Suite', () => {
     });
 
     teardown(async () => {
+        sandbox.restore();
         // Close all editors after each test
         await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     });
@@ -265,6 +273,18 @@ suite('Configure Command Test Suite', () => {
                 // Restore original methods
                 (DitaOtWrapper.prototype as any).configureOtPath = originalConfigureOtPath;
             }
+        });
+
+        test('configureDitaOTCommand は失敗理由をユーザーに伝える', async function() {
+            this.timeout(5000);
+
+            const errorMessageStub = sandbox.stub(vscode.window, 'showErrorMessage');
+            sandbox.stub(DitaOtWrapper.prototype, 'configureOtPath').rejects('Dialog closed');
+
+            await configureDitaOTCommand();
+
+            assert.ok(errorMessageStub.calledOnce, 'エラーメッセージを表示すること');
+            assert.ok(errorMessageStub.firstCall.args[0].includes('Dialog closed'), '元エラーを含めること');
         });
     });
 });

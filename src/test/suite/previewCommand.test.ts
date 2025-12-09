@@ -7,11 +7,21 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
+import sinon from 'sinon';
 import { DitaOtWrapper } from '../../utils/ditaOtWrapper';
 import { previewHTML5Command } from '../../commands/previewCommand';
+import { initializePreview } from '../../commands/previewCommand';
+import { DitaPreviewPanel } from '../../providers/previewPanel';
+
+let sandbox: sinon.SinonSandbox;
 
 suite('Preview Command Test Suite', () => {
     const fixturesPath = path.join(__dirname, '..', '..', '..', 'src', 'test', 'fixtures');
+
+    setup(() => {
+        sandbox = sinon.createSandbox();
+    });
 
     suiteSetup(async () => {
         // Get and activate extension
@@ -26,6 +36,7 @@ suite('Preview Command Test Suite', () => {
     });
 
     teardown(async () => {
+        sandbox.restore();
         // Close all editors after each test
         await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     });
@@ -454,6 +465,55 @@ suite('Preview Command Test Suite', () => {
             } finally {
                 // Restore original methods
                 (vscode.window as any).showErrorMessage = originalShowErrorMessage;
+            }
+        });
+
+        test('previewHTML5Command は DITA-OT 未設定時に設定ダイアログを案内する', async function() {
+            this.timeout(5000);
+
+            const configureStub = sandbox.stub(DitaOtWrapper.prototype, 'configureOtPath').resolves();
+            sandbox.stub(DitaOtWrapper.prototype, 'validateInputFile').returns({ valid: true });
+            sandbox.stub(DitaOtWrapper.prototype, 'verifyInstallation').resolves({ installed: false });
+
+            const showError = sandbox.stub(vscode.window, 'showErrorMessage').resolves('Configure Now' as any);
+
+            await previewHTML5Command(vscode.Uri.file('/tmp/missing.dita'));
+
+            assert.ok(showError.calledOnce, 'エラーダイアログを表示すること');
+            assert.ok(configureStub.calledOnce, 'Configure Now 選択で configureOtPath を呼ぶこと');
+        });
+
+        test('previewHTML5Command は既存出力を再利用し publish をスキップする', async function() {
+            this.timeout(7000);
+
+            const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ditacraft-preview-'));
+            const sourceFile = path.join(tempRoot, 'sample.dita');
+            const outputDir = path.join(tempRoot, 'out', 'html5', 'sample');
+            fs.mkdirSync(outputDir, { recursive: true });
+            fs.writeFileSync(sourceFile, '<topic/>', 'utf8');
+            const htmlFile = path.join(outputDir, 'index.html');
+            fs.writeFileSync(htmlFile, '<html></html>', 'utf8');
+
+            const now = Date.now();
+            fs.utimesSync(sourceFile, new Date(now - 20000), new Date(now - 20000));
+            fs.utimesSync(outputDir, new Date(now), new Date(now));
+
+            sandbox.stub(DitaOtWrapper.prototype, 'validateInputFile').returns({ valid: true });
+            sandbox.stub(DitaOtWrapper.prototype, 'verifyInstallation').resolves({ installed: true });
+            sandbox.stub(DitaOtWrapper.prototype, 'getOutputDirectory').returns(path.join(tempRoot, 'out'));
+            const publishStub = sandbox.stub(DitaOtWrapper.prototype, 'publish').resolves({ success: true, outputPath: outputDir });
+            const panelStub = sandbox.stub(DitaPreviewPanel, 'createOrShow');
+
+            initializePreview({ extensionUri: vscode.Uri.file(tempRoot) } as unknown as vscode.ExtensionContext);
+
+            try {
+                await previewHTML5Command(vscode.Uri.file(sourceFile));
+
+                assert.ok(panelStub.calledOnce, 'プレビューを開くこと');
+                assert.strictEqual(panelStub.firstCall.args[1], htmlFile, '生成済み HTML を指すこと');
+                assert.ok(publishStub.notCalled, 'キャッシュが新しければ publish しないこと');
+            } finally {
+                fs.rmSync(tempRoot, { recursive: true, force: true });
             }
         });
     });

@@ -7,11 +7,18 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import sinon from 'sinon';
 import { DitaOtWrapper } from '../../utils/ditaOtWrapper';
 import { publishCommand, publishHTML5Command } from '../../commands/publishCommand';
 
+let sandbox: sinon.SinonSandbox;
+
 suite('Publish Command Test Suite', () => {
     const fixturesPath = path.join(__dirname, '..', '..', '..', 'src', 'test', 'fixtures');
+
+    setup(() => {
+        sandbox = sinon.createSandbox();
+    });
 
     suiteSetup(async () => {
         // Get and activate extension
@@ -26,6 +33,7 @@ suite('Publish Command Test Suite', () => {
     });
 
     teardown(async () => {
+        sandbox.restore();
         // Close all editors after each test
         await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     });
@@ -545,6 +553,48 @@ suite('Publish Command Test Suite', () => {
                 (DitaOtWrapper.prototype as any).getOutputDirectory = originalGetOutputDirectory;
                 (DitaOtWrapper.prototype as any).publish = originalPublish;
             }
+        });
+
+        test('publishCommand は DITA-OT 未設定時に設定を促す', async function() {
+            this.timeout(5000);
+
+            const configureStub = sandbox.stub(DitaOtWrapper.prototype, 'configureOtPath').resolves();
+            sandbox.stub(DitaOtWrapper.prototype, 'validateInputFile').returns({ valid: true });
+            sandbox.stub(DitaOtWrapper.prototype, 'verifyInstallation').resolves({ installed: false });
+
+            const showError = sandbox.stub(vscode.window, 'showErrorMessage').resolves('Configure Now' as any);
+
+            await publishCommand(vscode.Uri.file('/tmp/missing.dita'));
+
+            assert.ok(showError.calledOnce, 'エラーメッセージを表示すること');
+            assert.ok(configureStub.calledOnce, 'Configure Now 選択で configureOtPath を呼ぶこと');
+        });
+
+        test('publishCommand は選択したトランスタイプを publish に渡す', async function() {
+            this.timeout(5000);
+
+            const publishOptions: any[] = [];
+            sandbox.stub(DitaOtWrapper.prototype, 'validateInputFile').returns({ valid: true });
+            sandbox.stub(DitaOtWrapper.prototype, 'verifyInstallation').resolves({ installed: true });
+            sandbox.stub(DitaOtWrapper.prototype, 'getAvailableTranstypes').resolves(['html5', 'pdf']);
+            sandbox.stub(DitaOtWrapper.prototype, 'getOutputDirectory').returns('/tmp/output');
+            sandbox.stub(DitaOtWrapper.prototype, 'publish').callsFake(async (opts: any) => {
+                publishOptions.push(opts);
+                return { success: true, outputPath: path.join(opts.outputDir) };
+            });
+
+            const showQuickPickStub = sandbox.stub(vscode.window, 'showQuickPick').resolves('pdf' as any);
+            const infoStub = sandbox.stub(vscode.window, 'showInformationMessage').resolves(undefined);
+            sandbox.stub(vscode.window, 'withProgress').callsFake(async (_options: any, task: (progress: vscode.Progress<{ message?: string; increment?: number }>, token: vscode.CancellationToken) => Thenable<unknown>) => {
+                return task({ report: () => {} } as any, {} as vscode.CancellationToken);
+            });
+
+            await publishCommand(vscode.Uri.file('/tmp/sample.dita'));
+
+            assert.ok(showQuickPickStub.calledOnce, 'フォーマット選択を表示すること');
+            assert.ok(publishOptions.length === 1, 'publish を 1 回だけ呼ぶこと');
+            assert.strictEqual(publishOptions[0].transtype, 'pdf', '選択したトランスタイプを渡すこと');
+            assert.ok(infoStub.calledOnce, '成功メッセージを表示すること');
         });
     });
 });
