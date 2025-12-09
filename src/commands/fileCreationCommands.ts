@@ -394,3 +394,16 @@ function generateBookmapContent(title: string, id: string): string {
 </bookmap>
 `;
 }
+
+/**
+ * Test-only exports for internal functions
+ * These are exported to allow unit testing of internal logic
+ */
+export const __test = {
+    validateFileName,
+    generateTopicContent,
+    generateMapContent,
+    generateBookmapContent,
+    FILE_NAME_PATTERN,
+    FILE_NAME_VALIDATION_MESSAGE
+};

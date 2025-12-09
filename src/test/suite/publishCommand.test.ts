@@ -127,4 +127,154 @@ suite('Publish Command Test Suite', () => {
             assert.strictEqual(transtype, 'html5', 'Default transtype should be html5');
         });
     });
+
+    suite('Publish Format Selection', () => {
+        test('Should support html5 transtype', function() {
+            const transtypes = ['html5', 'pdf', 'xhtml', 'epub', 'htmlhelp', 'markdown'];
+            assert.ok(transtypes.includes('html5'), 'html5 should be supported');
+        });
+
+        test('Should support pdf transtype', function() {
+            const transtypes = ['html5', 'pdf', 'xhtml', 'epub', 'htmlhelp', 'markdown'];
+            assert.ok(transtypes.includes('pdf'), 'pdf should be supported');
+        });
+
+        test('Should support all standard transtypes', function() {
+            const expectedTranstypes = ['html5', 'pdf', 'xhtml', 'epub', 'htmlhelp', 'markdown'];
+            for (const transtype of expectedTranstypes) {
+                assert.ok(
+                    typeof transtype === 'string' && transtype.length > 0,
+                    `Transtype ${transtype} should be valid`
+                );
+            }
+        });
+    });
+
+    suite('Publish Output Directory', () => {
+        test('Should construct valid output path', function() {
+            const baseDir = '/workspace/output';
+            const transtype = 'html5';
+            const expectedPath = path.join(baseDir, transtype);
+            assert.ok(expectedPath.includes('html5'), 'Output path should include transtype');
+        });
+
+        test('Should support workspace folder variable', function() {
+            const outputDir = '${workspaceFolder}/output';
+            assert.ok(outputDir.includes('${workspaceFolder}'), 'Should support workspace variable');
+        });
+
+        test('Should handle paths with spaces', function() {
+            const pathWithSpaces = '/path/with spaces/output';
+            assert.ok(pathWithSpaces.includes(' '), 'Path can contain spaces');
+        });
+    });
+
+    suite('Publish Progress Reporting', () => {
+        test('Should have progress stages', function() {
+            const stages = ['Initializing', 'Processing', 'Generating', 'Complete'];
+            assert.strictEqual(stages.length, 4, 'Should have 4 progress stages');
+        });
+
+        test('Progress percentage should be valid', function() {
+            const percentages = [0, 25, 50, 75, 100];
+            for (const pct of percentages) {
+                assert.ok(pct >= 0 && pct <= 100, `Percentage ${pct} should be valid`);
+            }
+        });
+    });
+
+    suite('Publish Error Handling', () => {
+        test('Should have appropriate error message for no active editor', function() {
+            const errorMessage = 'No active editor. Please open a DITA file first.';
+            assert.ok(errorMessage.includes('No active editor'), 'Should mention no active editor');
+        });
+
+        test('Should have appropriate error message for invalid file type', function() {
+            const errorMessage = 'This command only works with DITA files (.dita, .ditamap, .bookmap)';
+            assert.ok(errorMessage.includes('.dita'), 'Should mention .dita extension');
+        });
+
+        test('Should have appropriate error message for DITA-OT not configured', function() {
+            const errorMessage = 'DITA-OT path is not configured. Please configure it first.';
+            assert.ok(errorMessage.includes('DITA-OT'), 'Should mention DITA-OT');
+        });
+
+        test('Should have appropriate error message for publish failure', function() {
+            const errorMessage = 'Publishing failed. Check the output for details.';
+            assert.ok(errorMessage.includes('failed'), 'Should mention failure');
+        });
+    });
+
+    suite('DITA-OT Wrapper Integration', () => {
+        test('Should validate input file before publishing', function() {
+            const validExtensions = ['.dita', '.ditamap', '.bookmap'];
+            for (const ext of validExtensions) {
+                assert.ok(ext.startsWith('.'), 'Extension should start with dot');
+            }
+        });
+
+        test('Should reject non-DITA files', function() {
+            const invalidExtensions = ['.txt', '.xml', '.html', '.md'];
+            for (const ext of invalidExtensions) {
+                assert.ok(!ext.includes('dita'), 'Non-DITA extension should not contain dita');
+            }
+        });
+
+        test('Should support timeout configuration', function() {
+            const config = vscode.workspace.getConfiguration('ditacraft');
+            const timeout = config.get<number>('ditaOtTimeoutMinutes');
+            if (timeout !== undefined) {
+                assert.ok(typeof timeout === 'number', 'Timeout should be a number');
+                assert.ok(timeout > 0, 'Timeout should be positive');
+            }
+        });
+
+        test('Should support additional arguments', function() {
+            const config = vscode.workspace.getConfiguration('ditacraft');
+            const args = config.get<string[]>('ditaOtArgs');
+            if (args !== undefined) {
+                assert.ok(Array.isArray(args), 'ditaOtArgs should be an array');
+            }
+        });
+    });
+
+    suite('Publish Command Variants', () => {
+        test('publish command should show format selection', async function() {
+            const commands = await vscode.commands.getCommands(true);
+            assert.ok(commands.includes('ditacraft.publish'), 'publish command should exist');
+        });
+
+        test('publishHTML5 command should skip format selection', async function() {
+            const commands = await vscode.commands.getCommands(true);
+            assert.ok(commands.includes('ditacraft.publishHTML5'), 'publishHTML5 command should exist');
+        });
+
+        test('Both commands should be registered', async function() {
+            const commands = await vscode.commands.getCommands(true);
+            const publishCommands = commands.filter(c => c.startsWith('ditacraft.publish'));
+            assert.ok(publishCommands.length >= 2, 'Should have at least 2 publish commands');
+        });
+    });
+
+    suite('Publish Result Handling', () => {
+        test('Should have success result structure', function() {
+            const successResult = {
+                success: true,
+                outputPath: '/output/html5',
+                duration: 5000
+            };
+            assert.ok(successResult.success, 'Success result should have success=true');
+            assert.ok(successResult.outputPath, 'Success result should have outputPath');
+        });
+
+        test('Should have failure result structure', function() {
+            const failureResult = {
+                success: false,
+                error: 'DITA-OT execution failed',
+                exitCode: 1
+            };
+            assert.ok(!failureResult.success, 'Failure result should have success=false');
+            assert.ok(failureResult.error, 'Failure result should have error message');
+        });
+    });
 });

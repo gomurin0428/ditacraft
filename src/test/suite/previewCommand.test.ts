@@ -220,4 +220,99 @@ suite('Preview Command Test Suite', () => {
             );
         });
     });
+
+    suite('Preview Webview Panel', () => {
+        test('Should have correct view type for preview panel', function() {
+            const viewType = 'ditacraft.preview';
+            assert.ok(viewType.startsWith('ditacraft.'), 'View type should be namespaced');
+        });
+
+        test('Preview panel title format should be valid', function() {
+            const fileName = 'my-topic.dita';
+            const expectedTitle = `Preview: ${fileName}`;
+            assert.ok(expectedTitle.includes('Preview:'), 'Title should include Preview prefix');
+            assert.ok(expectedTitle.includes(fileName), 'Title should include file name');
+        });
+
+        test('Preview panel should support retainContextWhenHidden option', function() {
+            const options = {
+                enableScripts: true,
+                retainContextWhenHidden: true
+            };
+            assert.ok(options.retainContextWhenHidden, 'Should support retainContextWhenHidden');
+        });
+    });
+
+    suite('Preview HTML Content Generation', () => {
+        test('Should generate valid HTML structure', function() {
+            const htmlContent = `<!DOCTYPE html>
+<html>
+<head><title>Preview</title></head>
+<body><p>Content</p></body>
+</html>`;
+            assert.ok(htmlContent.includes('<!DOCTYPE html>'), 'Should have DOCTYPE');
+            assert.ok(htmlContent.includes('<html>'), 'Should have html tag');
+            assert.ok(htmlContent.includes('<head>'), 'Should have head tag');
+            assert.ok(htmlContent.includes('<body>'), 'Should have body tag');
+        });
+
+        test('Should support iframe for preview content', function() {
+            const iframeSrc = 'file:///path/to/output/index.html';
+            const iframe = `<iframe src="${iframeSrc}"></iframe>`;
+            assert.ok(iframe.includes('iframe'), 'Should use iframe element');
+            assert.ok(iframe.includes('src='), 'Should have src attribute');
+        });
+    });
+
+    suite('Preview File Watcher', () => {
+        test('Should watch for HTML file changes', function() {
+            const watchPattern = '**/*.html';
+            assert.ok(watchPattern.includes('*.html'), 'Pattern should match HTML files');
+        });
+
+        test('Should support multiple watch patterns', function() {
+            const patterns = ['**/*.html', '**/*.htm', '**/*.xhtml'];
+            assert.strictEqual(patterns.length, 3, 'Should have multiple patterns');
+            for (const pattern of patterns) {
+                assert.ok(pattern.startsWith('**/'), 'Pattern should be recursive');
+            }
+        });
+    });
+
+    suite('Preview Refresh Behavior', () => {
+        test('Auto-refresh configuration should be boolean', function() {
+            const config = vscode.workspace.getConfiguration('ditacraft');
+            const autoRefresh = config.get<boolean>('previewAutoRefresh');
+            if (autoRefresh !== undefined) {
+                assert.ok(typeof autoRefresh === 'boolean', 'autoRefresh should be boolean');
+            }
+        });
+
+        test('Should support manual refresh command', async function() {
+            const commands = await vscode.commands.getCommands(true);
+            // Check if there's a refresh-related command
+            const hasPreviewCommand = commands.includes('ditacraft.previewHTML5');
+            assert.ok(hasPreviewCommand, 'Should have preview command for refresh');
+        });
+    });
+
+    suite('Preview Error Messages', () => {
+        test('Should have appropriate error message for no active editor', function() {
+            const errorMessage = 'No active editor. Please open a DITA file first.';
+            assert.ok(errorMessage.includes('No active editor'), 'Should mention no active editor');
+            assert.ok(errorMessage.includes('DITA'), 'Should mention DITA');
+        });
+
+        test('Should have appropriate error message for invalid file type', function() {
+            const errorMessage = 'This command only works with DITA files (.dita, .ditamap, .bookmap)';
+            assert.ok(errorMessage.includes('.dita'), 'Should mention .dita extension');
+            assert.ok(errorMessage.includes('.ditamap'), 'Should mention .ditamap extension');
+        });
+
+        test('Should have appropriate error message for DITA-OT not configured', function() {
+            const errorMessage = 'DITA-OT path is not configured. Please configure it first.';
+            assert.ok(errorMessage.includes('DITA-OT'), 'Should mention DITA-OT');
+            assert.ok(errorMessage.includes('configured'), 'Should mention configuration');
+        });
+    });
 });

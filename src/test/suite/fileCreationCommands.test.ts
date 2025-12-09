@@ -5,6 +5,7 @@
 
 import * as assert from 'assert';
 import * as vscode from 'vscode';
+import { __test } from '../../commands/fileCreationCommands';
 
 suite('File Creation Commands Test Suite', () => {
 
@@ -184,6 +185,167 @@ suite('File Creation Commands Test Suite', () => {
                     `Topic type ${type} should be valid`
                 );
             }
+        });
+    });
+
+    suite('Internal Function Tests (validateFileName)', () => {
+        test('Should return null for valid file names', function() {
+            assert.strictEqual(__test.validateFileName('mytopic'), null);
+            assert.strictEqual(__test.validateFileName('my-topic'), null);
+            assert.strictEqual(__test.validateFileName('my_topic'), null);
+            assert.strictEqual(__test.validateFileName('topic123'), null);
+            assert.strictEqual(__test.validateFileName('Topic-Name_v2'), null);
+        });
+
+        test('Should return error message for empty file name', function() {
+            const result = __test.validateFileName('');
+            assert.strictEqual(result, 'File name is required');
+        });
+
+        test('Should return error message for file name with spaces', function() {
+            const result = __test.validateFileName('my topic');
+            assert.strictEqual(result, __test.FILE_NAME_VALIDATION_MESSAGE);
+        });
+
+        test('Should return error message for file name with special characters', function() {
+            assert.strictEqual(__test.validateFileName('my.topic'), __test.FILE_NAME_VALIDATION_MESSAGE);
+            assert.strictEqual(__test.validateFileName('my@topic'), __test.FILE_NAME_VALIDATION_MESSAGE);
+            assert.strictEqual(__test.validateFileName('my#topic'), __test.FILE_NAME_VALIDATION_MESSAGE);
+            assert.strictEqual(__test.validateFileName('my$topic'), __test.FILE_NAME_VALIDATION_MESSAGE);
+            assert.strictEqual(__test.validateFileName('my%topic'), __test.FILE_NAME_VALIDATION_MESSAGE);
+        });
+
+        test('FILE_NAME_PATTERN should match valid names', function() {
+            assert.ok(__test.FILE_NAME_PATTERN.test('valid-name'));
+            assert.ok(__test.FILE_NAME_PATTERN.test('valid_name'));
+            assert.ok(__test.FILE_NAME_PATTERN.test('ValidName123'));
+        });
+
+        test('FILE_NAME_PATTERN should not match invalid names', function() {
+            assert.ok(!__test.FILE_NAME_PATTERN.test('invalid name'));
+            assert.ok(!__test.FILE_NAME_PATTERN.test('invalid.name'));
+            assert.ok(!__test.FILE_NAME_PATTERN.test(''));
+        });
+    });
+
+    suite('Internal Function Tests (generateTopicContent)', () => {
+        test('Should generate valid topic content', function() {
+            const content = __test.generateTopicContent('topic', 'my-topic');
+            assert.ok(content.includes('<?xml version="1.0" encoding="UTF-8"?>'));
+            assert.ok(content.includes('<!DOCTYPE topic PUBLIC'));
+            assert.ok(content.includes('<topic id="my-topic">'));
+            assert.ok(content.includes('<title>Topic Title</title>'));
+            assert.ok(content.includes('<body>'));
+            assert.ok(content.includes('</topic>'));
+        });
+
+        test('Should generate valid concept content', function() {
+            const content = __test.generateTopicContent('concept', 'my-concept');
+            assert.ok(content.includes('<!DOCTYPE concept PUBLIC'));
+            assert.ok(content.includes('<concept id="my-concept">'));
+            assert.ok(content.includes('<conbody>'));
+            assert.ok(content.includes('</concept>'));
+        });
+
+        test('Should generate valid task content', function() {
+            const content = __test.generateTopicContent('task', 'my-task');
+            assert.ok(content.includes('<!DOCTYPE task PUBLIC'));
+            assert.ok(content.includes('<task id="my-task">'));
+            assert.ok(content.includes('<taskbody>'));
+            assert.ok(content.includes('<prereq>'));
+            assert.ok(content.includes('<steps>'));
+            assert.ok(content.includes('<step>'));
+            assert.ok(content.includes('</task>'));
+        });
+
+        test('Should generate valid reference content', function() {
+            const content = __test.generateTopicContent('reference', 'my-reference');
+            assert.ok(content.includes('<!DOCTYPE reference PUBLIC'));
+            assert.ok(content.includes('<reference id="my-reference">'));
+            assert.ok(content.includes('<refbody>'));
+            assert.ok(content.includes('<properties>'));
+            assert.ok(content.includes('</reference>'));
+        });
+
+        test('Should default to topic for unknown type', function() {
+            const content = __test.generateTopicContent('unknown', 'my-unknown');
+            assert.ok(content.includes('<!DOCTYPE topic PUBLIC'));
+            assert.ok(content.includes('<topic id="my-unknown">'));
+        });
+
+        test('Should use provided id in generated content', function() {
+            const content = __test.generateTopicContent('topic', 'custom-id-123');
+            assert.ok(content.includes('id="custom-id-123"'));
+        });
+    });
+
+    suite('Internal Function Tests (generateMapContent)', () => {
+        test('Should generate valid map content', function() {
+            const content = __test.generateMapContent('my-map');
+            assert.ok(content.includes('<?xml version="1.0" encoding="UTF-8"?>'));
+            assert.ok(content.includes('<!DOCTYPE map PUBLIC'));
+            assert.ok(content.includes('<map id="my-map">'));
+            assert.ok(content.includes('<title>Map Title</title>'));
+            assert.ok(content.includes('<topicref href="topic1.dita">'));
+            assert.ok(content.includes('</map>'));
+        });
+
+        test('Should include nested topicrefs', function() {
+            const content = __test.generateMapContent('test-map');
+            assert.ok(content.includes('<topicref href="subtopic1.dita"/>'));
+            assert.ok(content.includes('<topicref href="subtopic2.dita"/>'));
+        });
+
+        test('Should use provided id in map', function() {
+            const content = __test.generateMapContent('custom-map-id');
+            assert.ok(content.includes('id="custom-map-id"'));
+        });
+    });
+
+    suite('Internal Function Tests (generateBookmapContent)', () => {
+        test('Should generate valid bookmap content', function() {
+            const content = __test.generateBookmapContent('My Book Title', 'my-bookmap');
+            assert.ok(content.includes('<?xml version="1.0" encoding="UTF-8"?>'));
+            assert.ok(content.includes('<!DOCTYPE bookmap PUBLIC'));
+            assert.ok(content.includes('<bookmap id="my-bookmap">'));
+            assert.ok(content.includes('<mainbooktitle>My Book Title</mainbooktitle>'));
+            assert.ok(content.includes('</bookmap>'));
+        });
+
+        test('Should include bookmeta with author and dates', function() {
+            const content = __test.generateBookmapContent('Test Book', 'test-bookmap');
+            assert.ok(content.includes('<bookmeta>'));
+            assert.ok(content.includes('<author>Author Name</author>'));
+            assert.ok(content.includes('<critdates>'));
+            assert.ok(content.includes('<created date='));
+        });
+
+        test('Should include frontmatter and backmatter', function() {
+            const content = __test.generateBookmapContent('Test Book', 'test-bookmap');
+            assert.ok(content.includes('<frontmatter>'));
+            assert.ok(content.includes('<toc/>'));
+            assert.ok(content.includes('<backmatter>'));
+            assert.ok(content.includes('<indexlist/>'));
+        });
+
+        test('Should include chapter structure', function() {
+            const content = __test.generateBookmapContent('Test Book', 'test-bookmap');
+            assert.ok(content.includes('<chapter href="chapter1.ditamap">'));
+            assert.ok(content.includes('<chapter href="chapter2.ditamap">'));
+            assert.ok(content.includes('<topicref href="introduction.dita"/>'));
+            assert.ok(content.includes('<topicref href="getting-started.dita"/>'));
+        });
+
+        test('Should use provided title and id', function() {
+            const content = __test.generateBookmapContent('Custom Title', 'custom-id');
+            assert.ok(content.includes('<mainbooktitle>Custom Title</mainbooktitle>'));
+            assert.ok(content.includes('id="custom-id"'));
+        });
+
+        test('Should include current date in created element', function() {
+            const content = __test.generateBookmapContent('Test', 'test');
+            const today = new Date().toISOString().split('T')[0];
+            assert.ok(content.includes(`date="${today}"`));
         });
     });
 });
