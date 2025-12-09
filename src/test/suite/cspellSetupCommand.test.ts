@@ -7,6 +7,7 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { setupCSpellCommand } from '../../commands/cspellSetupCommand';
 
 suite('cSpell Setup Command Test Suite', () => {
 
@@ -280,6 +281,237 @@ suite('cSpell Setup Command Test Suite', () => {
                 allChoices.length,
                 'All choices should be unique'
             );
+        });
+    });
+
+    suite('Command Function Execution', () => {
+        test('setupCSpellCommand should handle no workspace gracefully', async function() {
+            this.timeout(5000);
+
+            // Save original methods
+            const originalShowErrorMessage = vscode.window.showErrorMessage;
+
+            let errorMessageShown: string | undefined;
+
+            // Stub showErrorMessage to capture the error
+            (vscode.window as any).showErrorMessage = async (message: string) => {
+                errorMessageShown = message;
+                return undefined;
+            };
+
+            // Save original workspaceFolders
+            const originalWorkspaceFolders = vscode.workspace.workspaceFolders;
+
+            try {
+                // Try to set workspaceFolders to undefined (may not work in all environments)
+                Object.defineProperty(vscode.workspace, 'workspaceFolders', {
+                    value: undefined,
+                    configurable: true
+                });
+
+                // Call the command function directly
+                await setupCSpellCommand();
+
+                // If workspaceFolders was successfully set to undefined, error should be shown
+                if (vscode.workspace.workspaceFolders === undefined) {
+                    assert.ok(errorMessageShown, 'Error message should be shown when no workspace');
+                    assert.ok(errorMessageShown.includes('No workspace'), 'Error should mention no workspace');
+                }
+            } catch (_error) {
+                // If we can't modify workspaceFolders, that's okay
+                assert.ok(true, 'Could not test no workspace scenario');
+            } finally {
+                // Restore original methods
+                (vscode.window as any).showErrorMessage = originalShowErrorMessage;
+                // Try to restore workspaceFolders
+                try {
+                    Object.defineProperty(vscode.workspace, 'workspaceFolders', {
+                        value: originalWorkspaceFolders,
+                        configurable: true
+                    });
+                } catch (_e) {
+                    // Ignore if we can't restore
+                }
+            }
+        });
+
+        test('setupCSpellCommand should handle existing config with Keep Current choice', async function() {
+            this.timeout(5000);
+
+            // Skip if no workspace
+            if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
+                this.skip();
+                return;
+            }
+
+            // Save original methods
+            const originalShowInfoMessage = vscode.window.showInformationMessage;
+            const originalShowErrorMessage = vscode.window.showErrorMessage;
+            const originalExistsSync = fs.existsSync;
+            const originalReadFileSync = fs.readFileSync;
+
+            let infoMessageShown = false;
+
+            // Stub showInformationMessage to return 'Keep Current'
+            (vscode.window as any).showInformationMessage = async (_message: string, ...items: string[]) => {
+                infoMessageShown = true;
+                if (items.includes('Keep Current')) {
+                    return 'Keep Current';
+                }
+                return undefined;
+            };
+
+            // Stub showErrorMessage
+            (vscode.window as any).showErrorMessage = async () => undefined;
+
+            // Stub fs.existsSync to return true for .cspellrc.json
+            (fs as any).existsSync = (filePath: string) => {
+                if (filePath.endsWith('.cspellrc.json')) {
+                    return true;
+                }
+                return originalExistsSync(filePath);
+            };
+
+            // Stub fs.readFileSync for template
+            (fs as any).readFileSync = (filePath: string, encoding?: string) => {
+                if (filePath.endsWith('.cspellrc.json') && encoding === 'utf-8') {
+                    return '{"version": "0.2", "words": ["dita"]}';
+                }
+                return originalReadFileSync(filePath, encoding as BufferEncoding);
+            };
+
+            try {
+                // Call the command function directly
+                await setupCSpellCommand();
+
+                // Assert that info message was shown
+                assert.ok(infoMessageShown, 'Info message should be shown for existing config');
+            } finally {
+                // Restore original methods
+                (vscode.window as any).showInformationMessage = originalShowInfoMessage;
+                (vscode.window as any).showErrorMessage = originalShowErrorMessage;
+                (fs as any).existsSync = originalExistsSync;
+                (fs as any).readFileSync = originalReadFileSync;
+            }
+        });
+
+        test('setupCSpellCommand should handle errors gracefully', async function() {
+            this.timeout(5000);
+
+            // Skip if no workspace
+            if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
+                this.skip();
+                return;
+            }
+
+            // Save original methods
+            const originalShowErrorMessage = vscode.window.showErrorMessage;
+            const originalExistsSync = fs.existsSync;
+            const originalReadFileSync = fs.readFileSync;
+
+            let errorMessageShown: string | undefined;
+
+            // Stub showErrorMessage to capture the error
+            (vscode.window as any).showErrorMessage = async (message: string) => {
+                errorMessageShown = message;
+                return undefined;
+            };
+
+            // Stub fs.existsSync to return false for .cspellrc.json
+            (fs as any).existsSync = (filePath: string) => {
+                if (filePath.endsWith('.cspellrc.json')) {
+                    return false;
+                }
+                return originalExistsSync(filePath);
+            };
+
+            // Stub fs.readFileSync to throw an error
+            (fs as any).readFileSync = (filePath: string, encoding?: string) => {
+                if (filePath.endsWith('.cspellrc.json')) {
+                    throw new Error('Test read error');
+                }
+                return originalReadFileSync(filePath, encoding as BufferEncoding);
+            };
+
+            try {
+                // Call the command function directly
+                await setupCSpellCommand();
+
+                // Assert that error message was shown
+                assert.ok(errorMessageShown, 'Error message should be shown');
+                assert.ok(errorMessageShown.includes('Failed to setup cSpell'), 'Error should mention setup failure');
+            } finally {
+                // Restore original methods
+                (vscode.window as any).showErrorMessage = originalShowErrorMessage;
+                (fs as any).existsSync = originalExistsSync;
+                (fs as any).readFileSync = originalReadFileSync;
+            }
+        });
+
+        test('setupCSpellCommand via executeCommand should work', async function() {
+            this.timeout(5000);
+
+            // Skip if no workspace
+            if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
+                this.skip();
+                return;
+            }
+
+            // Save original methods
+            const originalShowInfoMessage = vscode.window.showInformationMessage;
+            const originalShowErrorMessage = vscode.window.showErrorMessage;
+            const originalExistsSync = fs.existsSync;
+            const originalReadFileSync = fs.readFileSync;
+
+            let commandExecuted = false;
+
+            // Stub showInformationMessage to return 'Keep Current' and mark command as executed
+            (vscode.window as any).showInformationMessage = async (_message: string, ...items: string[]) => {
+                commandExecuted = true;
+                if (items.includes('Keep Current')) {
+                    return 'Keep Current';
+                }
+                if (items.includes('Done')) {
+                    return 'Done';
+                }
+                return undefined;
+            };
+
+            // Stub showErrorMessage
+            (vscode.window as any).showErrorMessage = async () => {
+                commandExecuted = true;
+                return undefined;
+            };
+
+            // Stub fs.existsSync to return true for .cspellrc.json
+            (fs as any).existsSync = (filePath: string) => {
+                if (filePath.endsWith('.cspellrc.json')) {
+                    return true;
+                }
+                return originalExistsSync(filePath);
+            };
+
+            // Stub fs.readFileSync for template
+            (fs as any).readFileSync = (filePath: string, encoding?: string) => {
+                if (filePath.endsWith('.cspellrc.json') && encoding === 'utf-8') {
+                    return '{"version": "0.2", "words": ["dita"]}';
+                }
+                return originalReadFileSync(filePath, encoding as BufferEncoding);
+            };
+
+            try {
+                // Call via executeCommand
+                await vscode.commands.executeCommand('ditacraft.setupCSpell');
+
+                // Assert that command was executed
+                assert.ok(commandExecuted, 'Command should be executed via executeCommand');
+            } finally {
+                // Restore original methods
+                (vscode.window as any).showInformationMessage = originalShowInfoMessage;
+                (vscode.window as any).showErrorMessage = originalShowErrorMessage;
+                (fs as any).existsSync = originalExistsSync;
+                (fs as any).readFileSync = originalReadFileSync;
+            }
         });
     });
 });

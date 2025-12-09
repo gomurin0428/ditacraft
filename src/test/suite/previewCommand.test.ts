@@ -7,6 +7,8 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { DitaOtWrapper } from '../../utils/ditaOtWrapper';
+import { previewHTML5Command } from '../../commands/previewCommand';
 
 suite('Preview Command Test Suite', () => {
     const fixturesPath = path.join(__dirname, '..', '..', '..', 'src', 'test', 'fixtures');
@@ -313,6 +315,146 @@ suite('Preview Command Test Suite', () => {
             const errorMessage = 'DITA-OT path is not configured. Please configure it first.';
             assert.ok(errorMessage.includes('DITA-OT'), 'Should mention DITA-OT');
             assert.ok(errorMessage.includes('configured'), 'Should mention configuration');
+        });
+    });
+
+    suite('Command Function Execution', () => {
+        test('previewHTML5Command should show error when no file is open', async function() {
+            this.timeout(5000);
+
+            // Save original methods
+            const originalShowErrorMessage = vscode.window.showErrorMessage;
+
+            let errorMessageShown: string | undefined;
+
+            // Stub showErrorMessage to capture the error
+            (vscode.window as any).showErrorMessage = async (message: string) => {
+                errorMessageShown = message;
+                return undefined;
+            };
+
+            try {
+                // Call the command function directly with no URI
+                await previewHTML5Command(undefined);
+
+                // Assert that error message was shown
+                assert.ok(errorMessageShown, 'Error message should be shown');
+                assert.ok(errorMessageShown.includes('No DITA file'), 'Error should mention no DITA file');
+            } finally {
+                // Restore original methods
+                (vscode.window as any).showErrorMessage = originalShowErrorMessage;
+            }
+        });
+
+        test('previewHTML5Command should validate input file', async function() {
+            this.timeout(5000);
+
+            // Save original methods
+            const originalShowErrorMessage = vscode.window.showErrorMessage;
+            const originalValidateInputFile = DitaOtWrapper.prototype.validateInputFile;
+
+            let errorMessageShown: string | undefined;
+            let validateCalled = false;
+
+            // Stub showErrorMessage to capture the error
+            (vscode.window as any).showErrorMessage = async (message: string) => {
+                errorMessageShown = message;
+                return undefined;
+            };
+
+            // Stub validateInputFile to return invalid
+            (DitaOtWrapper.prototype as any).validateInputFile = (_filePath: string) => {
+                validateCalled = true;
+                return { valid: false, error: 'Test validation error' };
+            };
+
+            try {
+                // Call the command function with a URI
+                const uri = vscode.Uri.file('/tmp/test.dita');
+                await previewHTML5Command(uri);
+
+                // Assert that validateInputFile was called
+                assert.ok(validateCalled, 'validateInputFile should be called');
+                // Assert that error message was shown
+                assert.ok(errorMessageShown, 'Error message should be shown');
+                assert.ok(errorMessageShown.includes('Cannot preview'), 'Error should mention cannot preview');
+            } finally {
+                // Restore original methods
+                (vscode.window as any).showErrorMessage = originalShowErrorMessage;
+                (DitaOtWrapper.prototype as any).validateInputFile = originalValidateInputFile;
+            }
+        });
+
+        test('previewHTML5Command should check DITA-OT installation', async function() {
+            this.timeout(5000);
+
+            // Save original methods
+            const originalShowErrorMessage = vscode.window.showErrorMessage;
+            const originalValidateInputFile = DitaOtWrapper.prototype.validateInputFile;
+            const originalVerifyInstallation = DitaOtWrapper.prototype.verifyInstallation;
+
+            let errorMessageShown: string | undefined;
+            let verifyInstallationCalled = false;
+
+            // Stub showErrorMessage to capture the error
+            (vscode.window as any).showErrorMessage = async (message: string, ..._items: string[]) => {
+                errorMessageShown = message;
+                return undefined;
+            };
+
+            // Stub validateInputFile to return valid
+            (DitaOtWrapper.prototype as any).validateInputFile = () => {
+                return { valid: true };
+            };
+
+            // Stub verifyInstallation to return not installed
+            (DitaOtWrapper.prototype as any).verifyInstallation = async () => {
+                verifyInstallationCalled = true;
+                return { installed: false };
+            };
+
+            try {
+                // Call the command function with a URI
+                const uri = vscode.Uri.file('/tmp/test.dita');
+                await previewHTML5Command(uri);
+
+                // Assert that verifyInstallation was called
+                assert.ok(verifyInstallationCalled, 'verifyInstallation should be called');
+                // Assert that error message was shown
+                assert.ok(errorMessageShown, 'Error message should be shown');
+                assert.ok(errorMessageShown.includes('DITA-OT'), 'Error should mention DITA-OT');
+            } finally {
+                // Restore original methods
+                (vscode.window as any).showErrorMessage = originalShowErrorMessage;
+                (DitaOtWrapper.prototype as any).validateInputFile = originalValidateInputFile;
+                (DitaOtWrapper.prototype as any).verifyInstallation = originalVerifyInstallation;
+            }
+        });
+
+        test('previewHTML5Command via executeCommand should work', async function() {
+            this.timeout(5000);
+
+            // Save original methods
+            const originalShowErrorMessage = vscode.window.showErrorMessage;
+
+            let commandExecuted = false;
+
+            // Stub showErrorMessage to mark command as executed
+            (vscode.window as any).showErrorMessage = async (_message: string) => {
+                commandExecuted = true;
+                return undefined;
+            };
+
+            try {
+                // Call via executeCommand (will show error since no file is open)
+                await vscode.commands.executeCommand('ditacraft.previewHTML5');
+
+                // Assert that command was executed (error message shown means command ran)
+                assert.ok(commandExecuted, 'Command should be executed via executeCommand');
+            } finally {
+                // Restore original methods
+                (vscode.window as any).showErrorMessage = originalShowErrorMessage;
+            }
         });
     });
 });

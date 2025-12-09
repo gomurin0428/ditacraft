@@ -7,6 +7,8 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { DitaOtWrapper } from '../../utils/ditaOtWrapper';
+import { publishCommand, publishHTML5Command } from '../../commands/publishCommand';
 
 suite('Publish Command Test Suite', () => {
     const fixturesPath = path.join(__dirname, '..', '..', '..', 'src', 'test', 'fixtures');
@@ -275,6 +277,274 @@ suite('Publish Command Test Suite', () => {
             };
             assert.ok(!failureResult.success, 'Failure result should have success=false');
             assert.ok(failureResult.error, 'Failure result should have error message');
+        });
+    });
+
+    suite('Command Function Execution', () => {
+        test('publishCommand should show error when no file is open', async function() {
+            this.timeout(5000);
+
+            // Save original methods
+            const originalShowErrorMessage = vscode.window.showErrorMessage;
+
+            let errorMessageShown: string | undefined;
+
+            // Stub showErrorMessage to capture the error
+            (vscode.window as any).showErrorMessage = async (message: string) => {
+                errorMessageShown = message;
+                return undefined;
+            };
+
+            try {
+                // Call the command function directly with no URI
+                await publishCommand(undefined);
+
+                // Assert that error message was shown
+                assert.ok(errorMessageShown, 'Error message should be shown');
+                assert.ok(errorMessageShown.includes('No DITA file'), 'Error should mention no DITA file');
+            } finally {
+                // Restore original methods
+                (vscode.window as any).showErrorMessage = originalShowErrorMessage;
+            }
+        });
+
+        test('publishHTML5Command should show error when no file is open', async function() {
+            this.timeout(5000);
+
+            // Save original methods
+            const originalShowErrorMessage = vscode.window.showErrorMessage;
+
+            let errorMessageShown: string | undefined;
+
+            // Stub showErrorMessage to capture the error
+            (vscode.window as any).showErrorMessage = async (message: string) => {
+                errorMessageShown = message;
+                return undefined;
+            };
+
+            try {
+                // Call the command function directly with no URI
+                await publishHTML5Command(undefined);
+
+                // Assert that error message was shown
+                assert.ok(errorMessageShown, 'Error message should be shown');
+                assert.ok(errorMessageShown.includes('No DITA file'), 'Error should mention no DITA file');
+            } finally {
+                // Restore original methods
+                (vscode.window as any).showErrorMessage = originalShowErrorMessage;
+            }
+        });
+
+        test('publishCommand should validate input file', async function() {
+            this.timeout(5000);
+
+            // Save original methods
+            const originalShowErrorMessage = vscode.window.showErrorMessage;
+            const originalValidateInputFile = DitaOtWrapper.prototype.validateInputFile;
+
+            let errorMessageShown: string | undefined;
+            let validateCalled = false;
+
+            // Stub showErrorMessage to capture the error
+            (vscode.window as any).showErrorMessage = async (message: string) => {
+                errorMessageShown = message;
+                return undefined;
+            };
+
+            // Stub validateInputFile to return invalid
+            (DitaOtWrapper.prototype as any).validateInputFile = (_filePath: string) => {
+                validateCalled = true;
+                return { valid: false, error: 'Test validation error' };
+            };
+
+            try {
+                // Call the command function with a URI
+                const uri = vscode.Uri.file('/tmp/test.dita');
+                await publishCommand(uri);
+
+                // Assert that validateInputFile was called
+                assert.ok(validateCalled, 'validateInputFile should be called');
+                // Assert that error message was shown
+                assert.ok(errorMessageShown, 'Error message should be shown');
+                assert.ok(errorMessageShown.includes('Cannot publish'), 'Error should mention cannot publish');
+            } finally {
+                // Restore original methods
+                (vscode.window as any).showErrorMessage = originalShowErrorMessage;
+                (DitaOtWrapper.prototype as any).validateInputFile = originalValidateInputFile;
+            }
+        });
+
+        test('publishCommand should check DITA-OT installation', async function() {
+            this.timeout(5000);
+
+            // Save original methods
+            const originalShowErrorMessage = vscode.window.showErrorMessage;
+            const originalValidateInputFile = DitaOtWrapper.prototype.validateInputFile;
+            const originalVerifyInstallation = DitaOtWrapper.prototype.verifyInstallation;
+
+            let errorMessageShown: string | undefined;
+            let verifyInstallationCalled = false;
+
+            // Stub showErrorMessage to capture the error
+            (vscode.window as any).showErrorMessage = async (message: string, ..._items: string[]) => {
+                errorMessageShown = message;
+                return undefined;
+            };
+
+            // Stub validateInputFile to return valid
+            (DitaOtWrapper.prototype as any).validateInputFile = () => {
+                return { valid: true };
+            };
+
+            // Stub verifyInstallation to return not installed
+            (DitaOtWrapper.prototype as any).verifyInstallation = async () => {
+                verifyInstallationCalled = true;
+                return { installed: false };
+            };
+
+            try {
+                // Call the command function with a URI
+                const uri = vscode.Uri.file('/tmp/test.dita');
+                await publishCommand(uri);
+
+                // Assert that verifyInstallation was called
+                assert.ok(verifyInstallationCalled, 'verifyInstallation should be called');
+                // Assert that error message was shown
+                assert.ok(errorMessageShown, 'Error message should be shown');
+                assert.ok(errorMessageShown.includes('DITA-OT'), 'Error should mention DITA-OT');
+            } finally {
+                // Restore original methods
+                (vscode.window as any).showErrorMessage = originalShowErrorMessage;
+                (DitaOtWrapper.prototype as any).validateInputFile = originalValidateInputFile;
+                (DitaOtWrapper.prototype as any).verifyInstallation = originalVerifyInstallation;
+            }
+        });
+
+        test('publishCommand should show format selection when DITA-OT is installed', async function() {
+            this.timeout(5000);
+
+            // Save original methods
+            const originalShowQuickPick = vscode.window.showQuickPick;
+            const originalShowErrorMessage = vscode.window.showErrorMessage;
+            const originalValidateInputFile = DitaOtWrapper.prototype.validateInputFile;
+            const originalVerifyInstallation = DitaOtWrapper.prototype.verifyInstallation;
+            const originalGetAvailableTranstypes = DitaOtWrapper.prototype.getAvailableTranstypes;
+
+            let quickPickShown = false;
+
+            // Stub showQuickPick to return undefined (user cancelled)
+            (vscode.window as any).showQuickPick = async () => {
+                quickPickShown = true;
+                return undefined;
+            };
+
+            // Stub showErrorMessage
+            (vscode.window as any).showErrorMessage = async () => undefined;
+
+            // Stub validateInputFile to return valid
+            (DitaOtWrapper.prototype as any).validateInputFile = () => {
+                return { valid: true };
+            };
+
+            // Stub verifyInstallation to return installed
+            (DitaOtWrapper.prototype as any).verifyInstallation = async () => {
+                return { installed: true, version: '4.0.0' };
+            };
+
+            // Stub getAvailableTranstypes
+            (DitaOtWrapper.prototype as any).getAvailableTranstypes = async () => {
+                return ['html5', 'pdf'];
+            };
+
+            try {
+                // Call the command function with a URI
+                const uri = vscode.Uri.file('/tmp/test.dita');
+                await publishCommand(uri);
+
+                // Assert that showQuickPick was called
+                assert.ok(quickPickShown, 'showQuickPick should be called for format selection');
+            } finally {
+                // Restore original methods
+                (vscode.window as any).showQuickPick = originalShowQuickPick;
+                (vscode.window as any).showErrorMessage = originalShowErrorMessage;
+                (DitaOtWrapper.prototype as any).validateInputFile = originalValidateInputFile;
+                (DitaOtWrapper.prototype as any).verifyInstallation = originalVerifyInstallation;
+                (DitaOtWrapper.prototype as any).getAvailableTranstypes = originalGetAvailableTranstypes;
+            }
+        });
+
+        test('publishHTML5Command should skip format selection', async function() {
+            this.timeout(5000);
+
+            // Save original methods
+            const originalShowQuickPick = vscode.window.showQuickPick;
+            const originalShowErrorMessage = vscode.window.showErrorMessage;
+            const originalShowInfoMessage = vscode.window.showInformationMessage;
+            const originalWithProgress = vscode.window.withProgress;
+            const originalValidateInputFile = DitaOtWrapper.prototype.validateInputFile;
+            const originalVerifyInstallation = DitaOtWrapper.prototype.verifyInstallation;
+            const originalGetOutputDirectory = DitaOtWrapper.prototype.getOutputDirectory;
+            const originalPublish = DitaOtWrapper.prototype.publish;
+
+            let quickPickShown = false;
+            let publishCalled = false;
+
+            // Stub showQuickPick to track if it's called
+            (vscode.window as any).showQuickPick = async () => {
+                quickPickShown = true;
+                return 'html5';
+            };
+
+            // Stub showErrorMessage
+            (vscode.window as any).showErrorMessage = async () => undefined;
+
+            // Stub showInformationMessage
+            (vscode.window as any).showInformationMessage = async () => undefined;
+
+            // Stub withProgress to execute the callback immediately
+            (vscode.window as any).withProgress = async (_options: unknown, callback: (progress: { report: () => void }) => Promise<unknown>) => {
+                return callback({ report: () => {} });
+            };
+
+            // Stub validateInputFile to return valid
+            (DitaOtWrapper.prototype as any).validateInputFile = () => {
+                return { valid: true };
+            };
+
+            // Stub verifyInstallation to return installed
+            (DitaOtWrapper.prototype as any).verifyInstallation = async () => {
+                return { installed: true, version: '4.0.0' };
+            };
+
+            // Stub getOutputDirectory
+            (DitaOtWrapper.prototype as any).getOutputDirectory = () => '/tmp/output';
+
+            // Stub publish
+            (DitaOtWrapper.prototype as any).publish = async () => {
+                publishCalled = true;
+                return { success: true, outputPath: '/tmp/output/html5' };
+            };
+
+            try {
+                // Call the command function with a URI
+                const uri = vscode.Uri.file('/tmp/test.dita');
+                await publishHTML5Command(uri);
+
+                // Assert that showQuickPick was NOT called (HTML5 skips format selection)
+                assert.ok(!quickPickShown, 'showQuickPick should NOT be called for publishHTML5');
+                // Assert that publish was called
+                assert.ok(publishCalled, 'publish should be called');
+            } finally {
+                // Restore original methods
+                (vscode.window as any).showQuickPick = originalShowQuickPick;
+                (vscode.window as any).showErrorMessage = originalShowErrorMessage;
+                (vscode.window as any).showInformationMessage = originalShowInfoMessage;
+                (vscode.window as any).withProgress = originalWithProgress;
+                (DitaOtWrapper.prototype as any).validateInputFile = originalValidateInputFile;
+                (DitaOtWrapper.prototype as any).verifyInstallation = originalVerifyInstallation;
+                (DitaOtWrapper.prototype as any).getOutputDirectory = originalGetOutputDirectory;
+                (DitaOtWrapper.prototype as any).publish = originalPublish;
+            }
         });
     });
 });
