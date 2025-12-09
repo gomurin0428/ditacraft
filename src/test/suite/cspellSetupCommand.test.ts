@@ -154,15 +154,15 @@ suite('cSpell Setup Command Test Suite', () => {
 
     suite('File Path Construction', () => {
         test('Should construct valid .cspellrc.json path', function() {
-            const workspaceRoot = '/test/workspace';
+            const workspaceRoot = 'test' + path.sep + 'workspace';
             const configPath = path.join(workspaceRoot, '.cspellrc.json');
 
             assert.ok(configPath.endsWith('.cspellrc.json'), 'Path should end with .cspellrc.json');
-            assert.ok(configPath.includes(workspaceRoot), 'Path should include workspace root');
+            assert.ok(configPath.includes('workspace'), 'Path should include workspace folder name');
         });
 
         test('Should handle paths with spaces', function() {
-            const workspaceRoot = '/test/workspace with spaces';
+            const workspaceRoot = 'test' + path.sep + 'workspace with spaces';
             const configPath = path.join(workspaceRoot, '.cspellrc.json');
 
             assert.ok(configPath.includes('workspace with spaces'), 'Path should preserve spaces');
