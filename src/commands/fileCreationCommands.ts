@@ -25,8 +25,10 @@ interface FileCreationOptions {
 
 /**
  * Validate file name input
+ * @param value - The file name to validate
+ * @returns null if valid, error message string if invalid
  */
-function validateFileName(value: string): string | null {
+export function validateFileName(value: string): string | null {
     if (!value) {
         return 'File name is required';
     }
@@ -249,8 +251,11 @@ export async function newBookmapCommand(): Promise<void> {
 
 /**
  * Generate DITA topic content based on type
+ * @param topicType - The type of topic (topic, concept, task, reference)
+ * @param id - The id attribute for the topic element
+ * @returns DITA XML content string
  */
-function generateTopicContent(topicType: string, id: string): string {
+export function generateTopicContent(topicType: string, id: string): string {
     switch (topicType) {
         case 'concept':
             return `<?xml version="1.0" encoding="UTF-8"?>
@@ -344,8 +349,10 @@ function generateTopicContent(topicType: string, id: string): string {
 
 /**
  * Generate DITA map content
+ * @param id - The id attribute for the map element
+ * @returns DITA map XML content string
  */
-function generateMapContent(id: string): string {
+export function generateMapContent(id: string): string {
     return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE map PUBLIC "-//OASIS//DTD DITA Map//EN" "map.dtd">
 <map id="${id}">
@@ -361,8 +368,11 @@ function generateMapContent(id: string): string {
 
 /**
  * Generate DITA bookmap content
+ * @param title - The main book title
+ * @param id - The id attribute for the bookmap element
+ * @returns DITA bookmap XML content string
  */
-function generateBookmapContent(title: string, id: string): string {
+export function generateBookmapContent(title: string, id: string): string {
     return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE bookmap PUBLIC "-//OASIS//DTD DITA BookMap//EN" "bookmap.dtd">
 <bookmap id="${id}">
